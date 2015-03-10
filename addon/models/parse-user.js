@@ -17,6 +17,22 @@ var ParseUser = DS.Model.extend({
 });
 
 ParseUser.reopenClass({
+    current: function(store, data) {
+      if(Ember.isEmpty(this.typeKey)) {
+        throw new Error('ParseUser.current must be called on a model fetched via store.modelFor');
+      }
+
+      var model = this;
+      var adapter = store.adapterFor(model);
+      var serializer = store.serializerFor(model);
+      return adapter.ajax(adapter.buildURL("parseUser", "me"), "GET", {}).then(function(response) {
+        serializer.normalize(model, response);
+        return store.push(model, response);
+      }, function(response) {
+        return Ember.RSVP.reject(response.responseJSON);
+      });
+    },
+
     requestPasswordReset: function( email ) {
         var adapter = this.get( 'store' ).adapterFor( this ),
             data    = { email: email };

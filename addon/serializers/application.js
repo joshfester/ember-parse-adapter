@@ -66,100 +66,94 @@ export default DS.RESTSerializer.extend({
     * conditions there is a secondary query to retrieve the "many"
     * side of the "hasMany".
     */
-    normalizeRelationships: function( type, hash ) {
-        var store      = this.get('store'),
-            serializer = this;
+    normalizeRelationships: function(type, hash){
+      var store = this.get('store');
+      var serializer = this;
 
-        type.eachRelationship( function( key, relationship ) {
+      type.eachRelationship(function(key, relationship) {
 
-            var options = relationship.options;
+        var options = relationship.options;
 
-            // Handle the belongsTo relationships
-            if ( hash[key] && 'belongsTo' === relationship.kind ) {
-                hash[key] = hash[key].objectId;
-            }
-
-            // Handle the hasMany relationships
-            if ( hash[key] && 'hasMany' === relationship.kind ) {
-
-                // If this is a Relation hasMany then we need to supply
-                // the links property so the adapter can async call the
-                // relationship.
-                // The adapter findHasMany has been overridden to make use of this.
-                if ( options.relation ) {
-                    hash.links = {};
-                    hash.links[key] = { type: relationship.type, key: key };
-                }
-
-                if ( options.array ) {
-                    // Parse will return [null] for empty relationships
-                    if ( hash[key].length && hash[key] ) {
-                        hash[key].forEach( function( item, index, items ) {
-                            // When items are pointers we just need the id
-                            // This occurs when request was made without the include query param.
-                            if ( 'Pointer' === item.__type ) {
-                                items[index] = item.objectId;
-
-                            } else {
-                                // When items are objects we need to clean them and add them to the store.
-                                // This occurs when request was made with the include query param.
-                                delete item.__type;
-                                delete item.className;
-                                item.id = item.objectId;
-                                delete item.objectId;
-                                item.type = relationship.type;
-                                serializer.normalizeAttributes( relationship.type, item );
-                                serializer.normalizeRelationships( relationship.type, item );
-                                store.push( relationship.type, item );
-                            }
-                        });
-                    }
-                }
-            }
-        }, this );
-
-        this._super( type, hash );
-    },
-
-    serializeIntoHash: function( hash, type, record, options ) {
-        Ember.merge( hash, this.serialize( record, options ) );
-    },
-
-    serializeAttribute: function( record, json, key, attribute ) {
-        // These are Parse reserved properties and we won't send them.
-        if ( 'createdAt' === key ||
-            'updatedAt' === key ||
-            'emailVerified' === key ||
-            'sessionToken' === key
-        ) {
-            delete json[key];
-
-        } else {
-            this._super( record, json, key, attribute );
+        // Handle the belongsTo relationships
+        if(hash[key] && relationship.kind === 'belongsTo'){
+          hash[key] = hash[key].objectId;
         }
+
+        // Handle the hasMany relationships
+        if(hash[key] && relationship.kind === 'hasMany'){
+
+          // If this is a Relation hasMany then we need to supply
+          // the links property so the adapter can async call the
+          // relationship.
+          // The adapter findHasMany has been overridden to make use of this.
+          if(options.relation) {
+            // hash[key] contains the response of Parse.com: eg {__type: Relation, className: MyParseClassName}
+            // this is an object that make ember-data fail, as it expects nothing or an array ids that represent the records
+            hash[key] = [];
+
+            // ember-data expects the link to be a string
+            // The adapter findHasMany will parse it
+            if (!hash.links) hash.links = {};
+            hash.links[key] = JSON.stringify({typeKey: relationship.type.typeKey, key: key});
+          }
+
+          if(options.array){
+            // Parse will return [null] for empty relationships
+            if(hash[key].length && hash[key]){
+              hash[key].forEach(function(item, index, items){
+                // When items are pointers we just need the id
+                // This occurs when request was made without the include query param.
+                if(item.__type === "Pointer"){
+                  items[index] = item.objectId;
+                } else {
+                  // When items are objects we need to clean them and add them to the store.
+                  // This occurs when request was made with the include query param.
+                  delete item.__type;
+                  delete item.className;
+                  item.id = item.objectId;
+                  delete item.objectId;
+                  item.type = relationship.type;
+                  serializer.normalizeAttributes(relationship.type, item);
+                  serializer.normalizeRelationships(relationship.type, item);
+                  store.push(relationship.type, item);
+                }
+              });
+            }
+          }
+
+        }
+      }, this);
+
+      this._super(type, hash);
     },
 
-    serializeBelongsTo: function( record, json, relationship ) {
-        var key       = relationship.key,
-            belongsTo = record.get( key );
+    serializeIntoHash: function(hash, type, snapshot, options){
+      Ember.merge(hash, this.serialize(snapshot, options));
+    },
 
-        if ( belongsTo ) {
-            // @TODO: Perhaps this is working around a bug in Ember-Data? Why should
-            // promises be returned here.
-            if ( belongsTo instanceof DS.PromiseObject ) {
-                if ( !belongsTo.get('isFulfilled' ) ) {
-                    throw new Error( 'belongsTo values *must* be fulfilled before attempting to serialize them' );
-                }
+    serializeAttribute: function(snapshot, json, key, attribute) {
+      // These are Parse reserved properties and we won't send them.
+      if( key === 'createdAt' ||
+          key === 'updatedAt' ||
+          key === 'emailVerified' ||
+          key === 'sessionToken' ){
+        delete json[key];
+      } else {
+        this._super(snapshot, json, key, attribute);
+      }
+    },
 
-                belongsTo = belongsTo.get( 'content' );
-            }
+    serializeBelongsTo: function(snapshot, json, relationship){
+      var key = relationship.key;
 
-            json[key] = {
-                '__type'    : 'Pointer',
-                'className' : this.parseClassName( belongsTo.constructor.typeKey ),
-                'objectId'  : belongsTo.get( 'id' )
-            };
-        }
+      var belongsTo = snapshot.belongsTo(key);
+      var belongsToId = snapshot.belongsTo(key, { id: true });
+
+      json[key] = {
+        "__type": "Pointer",
+        "className": this.parseClassName(belongsTo.typeKey),
+        "objectId": belongsToId
+      };
     },
 
     parseClassName: function( key ) {
@@ -171,62 +165,62 @@ export default DS.RESTSerializer.extend({
         }
     },
 
-    serializeHasMany: function( record, json, relationship ) {
-        var key     = relationship.key,
-            hasMany = record.get( key ),
-            options = relationship.options;
+    serializeHasMany: function(snapshot, json, relationship){
+      var key = relationship.key;
+      var hasMany = snapshot.hasMany(key);
+      var options = relationship.options;
 
-        if ( hasMany && hasMany.get( 'length' ) > 0 ) {
-            json[key] = { 'objects': [] };
+      if((!Ember.isEmpty(hasMany)) && hasMany.get('length') > 0){
 
-            if ( options.relation ) {
-                json[key].__op = 'AddRelation';
-            }
+        json[key] = { "objects": [] };
 
-            if ( options.array ) {
-                json[key].__op = 'AddUnique';
-            }
-
-            hasMany.forEach( function( child ) {
-                json[key].objects.push({
-                    '__type'    : 'Pointer',
-                    'className' : child.parseClassName(),
-                    'objectId'  : child.get( 'id' )
-                });
-            });
-
-            if ( hasMany._deletedItems && hasMany._deletedItems.length ) {
-                if ( options.relation ) {
-                    var addOperation    = json[key],
-                        deleteOperation = { '__op': 'RemoveRelation', 'objects': [] };
-
-                    hasMany._deletedItems.forEach( function( item ) {
-                        deleteOperation.objects.push({
-                            '__type'    : 'Pointer',
-                            'className' : item.type,
-                            'objectId'  : item.id
-                        });
-                    });
-
-                    json[key] = { '__op': 'Batch', 'ops': [addOperation, deleteOperation] };
-                }
-
-                if ( options.array ) {
-                    json[key].deleteds = { '__op': 'Remove', 'objects': [] };
-
-                    hasMany._deletedItems.forEach( function( item ) {
-                        json[key].deleteds.objects.push({
-                            '__type'    : 'Pointer',
-                            'className' : item.type,
-                            'objectId'  : item.id
-                        });
-                    });
-                }
-            }
-
-        } else {
-            json[key] = [];
+        if(options.relation){
+          json[key].__op = "AddRelation";
         }
+
+        if(options.array){
+          json[key].__op = "AddUnique";
+        }
+
+        var _this = this;
+
+        hasMany.forEach(function(child){
+          json[key].objects.push({
+            "__type": "Pointer",
+            "className": _this.parseClassName(child.type.typeKey),
+            "objectId": child.attr('id')
+          });
+        });
+
+        if(hasMany._deletedItems && hasMany._deletedItems.length){
+          if(options.relation){
+            var addOperation = json[key];
+            var deleteOperation = { "__op": "RemoveRelation", "objects": [] };
+            hasMany._deletedItems.forEach(function(item){
+              deleteOperation.objects.push({
+                "__type": "Pointer",
+                "className": item.type,
+                "objectId": item.id
+              });
+            });
+            json[key] = { "__op": "Batch", "ops": [addOperation, deleteOperation] };
+          }
+          if(options.array){
+            json[key].deleteds = { "__op": "Remove", "objects": [] };
+            hasMany._deletedItems.forEach(function(item){
+              json[key].deleteds.objects.push({
+                "__type": "Pointer",
+                "className": item.type,
+                "objectId": item.id
+              });
+            });
+          }
+        }
+      } else {
+        if (!options.relation) {
+          json[key] = []; // Parse return a 400 bad request error if use an array to represent a relation
+        }
+      }
     }
 
 });

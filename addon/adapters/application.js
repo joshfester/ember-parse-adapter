@@ -21,13 +21,15 @@ export default DS.RESTAdapter.extend({
     classesPath: 'classes',
 
     pathForType: function( type ) {
-        if ( 'parseUser' === type ) {
-            return 'users';
-        } else if ( 'login' === type ) {
-            return 'login';
-        } else {
-            return this.classesPath + '/' + this.parsePathForType( type );
-        }
+      if ("parseUser" === type) {
+        return "users";
+      } else if ("login" === type) {
+        return "login";
+      } else if ("function" === type) {
+        return "functions";
+      } else {
+        return this.classesPath + '/' + this.parsePathForType(type);
+      }
     },
 
     // Using TitleStyle is recommended by Parse
@@ -77,6 +79,11 @@ export default DS.RESTAdapter.extend({
             adapter     = this;
 
         serializer.serializeIntoHash(data, type, record);
+
+        // remove the password if we're updating a user
+        if(type.typeKey === 'parseUser') {
+          delete data.password;
+        }
 
         type.eachRelationship(function( key ) {
             if ( data[key] && data[key].deleteds ) {
